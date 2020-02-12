@@ -107,6 +107,15 @@ func (p Dataset) String() string {
 	return string(data)
 }
 
+func (d *Dataset) ListChildren(types DatasetType) (children []string) {
+	for list := C.dataset_list_children(d.list); list != nil; list = C.dataset_next(list) {
+		if (DatasetType(C.dataset_type(list)) & types) != 0 {
+			children = append(children, C.GoString(C.dataset_get_name(list)))
+		}
+	}
+	return
+}
+
 func (d *Dataset) openChildren() (err error) {
 	d.Children = make([]Dataset, 0, 5)
 	list := C.dataset_list_children(d.list)
