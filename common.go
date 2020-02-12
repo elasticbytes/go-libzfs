@@ -283,9 +283,13 @@ const (
 	DatasetNumProps
 )
 
+func NewSimpleError(errcode ErrorCode) error {
+	return NewError(errcode, C.GoString(C.libzfs_strerrno(C.int(errcode))))
+}
+
 // LastError get last underlying libzfs error description if any
 func LastError() (err error) {
-	return NewError(int(C.libzfs_last_error()), C.GoString(C.libzfs_last_error_str()))
+	return NewError(ErrorCode(C.libzfs_last_error()), C.GoString(C.libzfs_last_error_str()))
 }
 
 // ClearLastError force clear of any last error set by undeliying libzfs
@@ -293,10 +297,6 @@ func ClearLastError() (err error) {
 	err = LastError()
 	C.libzfs_clear_last_error()
 	return
-}
-
-func LastErrorCode() int {
-	return int(C.libzfs_last_error())
 }
 
 func booleanT(b bool) (r C.boolean_t) {

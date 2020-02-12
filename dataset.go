@@ -28,15 +28,15 @@ type DatasetType int32
 
 const (
 	// DatasetTypeFilesystem - file system dataset
-	DatasetTypeFilesystem DatasetType = (1 << 0)
+	DatasetTypeFilesystem DatasetType = (1 << iota)
 	// DatasetTypeSnapshot - snapshot of dataset
-	DatasetTypeSnapshot = (1 << 1)
+	DatasetTypeSnapshot
 	// DatasetTypeVolume - volume (virtual block device) dataset
-	DatasetTypeVolume = (1 << 2)
+	DatasetTypeVolume
 	// DatasetTypePool - pool dataset
-	DatasetTypePool = (1 << 3)
+	DatasetTypePool
 	// DatasetTypeBookmark - bookmark dataset
-	DatasetTypeBookmark = (1 << 4)
+	DatasetTypeBookmark
 )
 
 // HoldTag - user holds  tags
@@ -124,7 +124,7 @@ func DatasetOpenSingle(path string) (d Dataset, err error) {
 	if d.list == nil || d.list.zh == nil {
 		err = LastError()
 		if err == nil {
-			err = NewError(int(C.ENOENT), "dataset not found.")
+			err = NewError(ErrorCode(C.ENOENT), "dataset not found.")
 		}
 		err = NewError(err.(*Error).ErrorCode(), fmt.Sprintf("%s - %s", err.Error(), path))
 		return
@@ -143,7 +143,7 @@ func datasetPropertiesTonvlist(props map[Prop]Property) (
 	// convert properties to nvlist C type
 	cprops = C.new_property_nvlist()
 	if cprops == nil {
-		err = NewError(int(C.EZFS_NOMEM), "Failed to allocate properties")
+		err = NewError(ENomem, "Failed to allocate properties")
 		return
 	}
 	for prop, value := range props {
@@ -214,7 +214,7 @@ func (d *Dataset) Destroy(Defer bool) (err error) {
 		if err != nil {
 			dsType.Value = err.Error() // just put error (why it didn't fetch property type)
 		}
-		err = NewError(int(EUndefined), fmt.Sprintf("cannot destroy dataset " + path +
+		err = NewError(EUndefined, fmt.Sprintf("cannot destroy dataset " + path +
 			": " + dsType.Value + " has children"))
 		return err
 	}
@@ -223,7 +223,7 @@ func (d *Dataset) Destroy(Defer bool) (err error) {
 			err = LastError()
 		}
 	} else {
-		err = NewError(int(EUndefined), msgDatasetIsNil)
+		err = NewError(EUndefined, msgDatasetIsNil)
 	}
 	return
 }
@@ -288,7 +288,7 @@ func (d *Dataset) DestroyRecursive() (err error) {
 // Pool returns pool dataset belongs to
 func (d *Dataset) Pool() (p Pool, err error) {
 	if d.list == nil {
-		err = NewError(int(EUndefined), msgDatasetIsNil)
+		err = NewError(EUndefined, msgDatasetIsNil)
 		return
 	}
 	p.list = C.dataset_get_pool(d.list)
@@ -313,7 +313,7 @@ func (d *Dataset) PoolName() string {
 // ReloadProperties re-read dataset's properties
 func (d *Dataset) ReloadProperties() (err error) {
 	if d.list == nil {
-		err = NewError(int(EUndefined), msgDatasetIsNil)
+		err = NewError(EUndefined, msgDatasetIsNil)
 		return
 	}
 	d.Properties = make(map[Prop]Property)
@@ -335,7 +335,7 @@ func (d *Dataset) ReloadProperties() (err error) {
 // property in Properties map.
 func (d *Dataset) GetProperty(p Prop) (prop Property, err error) {
 	if d.list == nil {
-		err = NewError(int(EUndefined), msgDatasetIsNil)
+		err = NewError(EUndefined, msgDatasetIsNil)
 		return
 	}
 	Global.Mtx.Lock()
@@ -355,7 +355,7 @@ func (d *Dataset) GetProperty(p Prop) (prop Property, err error) {
 // GetUserProperty - lookup and return user propery
 func (d *Dataset) GetUserProperty(p string) (prop Property, err error) {
 	if d.list == nil {
-		err = NewError(int(EUndefined), msgDatasetIsNil)
+		err = NewError(EUndefined, msgDatasetIsNil)
 		return
 	}
 	csp := C.CString(p)
@@ -376,7 +376,7 @@ func (d *Dataset) GetUserProperty(p string) (prop Property, err error) {
 // Always check if returned error and its description.
 func (d *Dataset) SetProperty(p Prop, value string) (err error) {
 	if d.list == nil {
-		err = NewError(int(EUndefined), msgDatasetIsNil)
+		err = NewError(EUndefined, msgDatasetIsNil)
 		return
 	}
 	csValue := C.CString(value)
@@ -395,7 +395,7 @@ func (d *Dataset) SetProperty(p Prop, value string) (err error) {
 // SetUserProperty -
 func (d *Dataset) SetUserProperty(prop, value string) (err error) {
 	if d.list == nil {
-		err = NewError(int(EUndefined), msgDatasetIsNil)
+		err = NewError(EUndefined, msgDatasetIsNil)
 		return
 	}
 	csValue := C.CString(value)
@@ -414,7 +414,7 @@ func (d *Dataset) SetUserProperty(prop, value string) (err error) {
 func (d *Dataset) Clone(target string, props map[Prop]Property) (rd Dataset, err error) {
 	var cprops C.nvlist_ptr
 	if d.list == nil {
-		err = NewError(int(EUndefined), msgDatasetIsNil)
+		err = NewError(EUndefined, msgDatasetIsNil)
 		return
 	}
 	if cprops, err = datasetPropertiesTonvlist(props); err != nil {
@@ -451,7 +451,7 @@ func DatasetSnapshot(path string, recur bool, props map[Prop]Property) (rd Datas
 // Path return zfs dataset path/name
 func (d *Dataset) Path() (path string, err error) {
 	if d.list == nil {
-		err = NewError(int(EUndefined), msgDatasetIsNil)
+		err = NewError(EUndefined, msgDatasetIsNil)
 		return
 	}
 	name := C.dataset_get_name(d.list)
@@ -462,7 +462,7 @@ func (d *Dataset) Path() (path string, err error) {
 // Rollback rollabck's dataset snapshot
 func (d *Dataset) Rollback(snap *Dataset, force bool) (err error) {
 	if d.list == nil {
-		err = NewError(int(EUndefined), msgDatasetIsNil)
+		err = NewError(EUndefined, msgDatasetIsNil)
 		return
 	}
 	if errc := C.dataset_rollback(d.list, snap.list, booleanT(force)); errc != 0 {
@@ -476,7 +476,7 @@ func (d *Dataset) Rollback(snap *Dataset, force bool) (err error) {
 // Promote promotes dataset clone
 func (d *Dataset) Promote() (err error) {
 	if d.list == nil {
-		err = NewError(int(EUndefined), msgDatasetIsNil)
+		err = NewError(EUndefined, msgDatasetIsNil)
 		return
 	}
 	if errc := C.dataset_promote(d.list); errc != 0 {
@@ -491,7 +491,7 @@ func (d *Dataset) Promote() (err error) {
 func (d *Dataset) Rename(newName string, recur,
 	forceUnmount bool) (err error) {
 	if d.list == nil {
-		err = NewError(int(EUndefined), msgDatasetIsNil)
+		err = NewError(EUndefined, msgDatasetIsNil)
 		return
 	}
 	csNewName := C.CString(newName)
@@ -528,7 +528,7 @@ func (d *Dataset) Mount(options string, flags int) (err error) {
 	Global.Mtx.Lock()
 	defer Global.Mtx.Unlock()
 	if d.list == nil {
-		err = NewError(int(EUndefined), msgDatasetIsNil)
+		err = NewError(EUndefined, msgDatasetIsNil)
 		return
 	}
 	csOptions := C.CString(options)
@@ -542,7 +542,7 @@ func (d *Dataset) Mount(options string, flags int) (err error) {
 // Unmount the given filesystem.
 func (d *Dataset) Unmount(flags int) (err error) {
 	if d.list == nil {
-		err = NewError(int(EUndefined), msgDatasetIsNil)
+		err = NewError(EUndefined, msgDatasetIsNil)
 		return
 	}
 	if ec := C.dataset_unmount(d.list, C.int(flags)); ec != 0 {
@@ -555,7 +555,7 @@ func (d *Dataset) Unmount(flags int) (err error) {
 // mountpoint property.
 func (d *Dataset) UnmountAll(flags int) (err error) {
 	if d.list == nil {
-		err = NewError(int(EUndefined), msgDatasetIsNil)
+		err = NewError(EUndefined, msgDatasetIsNil)
 		return
 	}
 	// This is implemented recursive because zfs_unmountall() didn't work
@@ -578,7 +578,7 @@ func (d *Dataset) Hold(flag string) (err error) {
 		return
 	}
 	if !strings.Contains(path, "@") {
-		err = NewError(int(EUndefined), fmt.Sprintf("'%s' is not a snapshot", path))
+		err = NewError(EUndefined, fmt.Sprintf("'%s' is not a snapshot", path))
 		return
 	}
 	pd, err = DatasetOpenSingle(path[:strings.Index(path, "@")])
@@ -606,7 +606,7 @@ func (d *Dataset) Release(flag string) (err error) {
 		return
 	}
 	if !strings.Contains(path, "@") {
-		err = NewError(int(EUndefined), fmt.Sprintf("'%s' is not a snapshot", path))
+		err = NewError(EUndefined, fmt.Sprintf("'%s' is not a snapshot", path))
 		return
 	}
 	pd, err = DatasetOpenSingle(path[:strings.Index(path, "@")])
@@ -634,7 +634,7 @@ func (d *Dataset) Holds() (tags []HoldTag, err error) {
 		return
 	}
 	if !strings.Contains(path, "@") {
-		err = NewError(int(EUndefined), fmt.Sprintf("'%s' is not a snapshot", path))
+		err = NewError(EUndefined, fmt.Sprintf("'%s' is not a snapshot", path))
 		return
 	}
 	if 0 != C.zfs_get_holds(d.list.zh, &nvl) {

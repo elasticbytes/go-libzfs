@@ -1,11 +1,13 @@
 package zfs
 
+import (
+	"errors"
+)
+
 type ErrorCode int
 
 const (
-	EUndefined 	ErrorCode = iota - 1
-	ESuccess            = 0            /* no error -- success */
-	ENomem              = 2000 << iota /* out of memory */
+	ENomem     ErrorCode = 2000 + iota /* out of memory */
 	EBadprop                           /* invalid property value */
 	EPropreadonly                      /* cannot set readonly property */
 	EProptype                          /* property does not apply to dataset type */
@@ -76,11 +78,14 @@ const (
 	EDiffdata                          /* bad zfs diff data */
 	EPoolreadonly                      /* pool is in read-only mode */
 	EUnknown
+
+	EUndefined ErrorCode = -1
+	ESuccess   ErrorCode =  0          /* no error -- success */
 )
 
 
 type Error struct {
-	code 	int
+	code 	ErrorCode
 	message	string
 }
 
@@ -88,14 +93,23 @@ func (self *Error) Error() string {
 	return self.message
 }
 
-func (self *Error) ErrorCode() int {
+func (self *Error) ErrorCode() ErrorCode {
 	return self.code
 }
 
-func NewError(errcode int, msg string) error {
+func NewError(errcode ErrorCode, msg string) error {
 	return &Error{
 		code: errcode,
 		message: msg,
 	}
 }
 
+func IsError(err error) (ok bool, errcode ErrorCode, msg string) {
+	var e *Error
+	if err != nil && errors.As(err, &e) {
+		ok      = true
+		errcode = e.code
+		msg     = e.message
+	}
+	return
+}
