@@ -11,6 +11,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"encoding/json"
 	"strconv"
 	"time"
 	"unsafe"
@@ -27,7 +28,7 @@ const (
 )
 
 // PoolProperties type is map of pool properties name -> value
-type PoolProperties map[Prop]string
+type PoolProperties map[PoolProp]PropertyValue
 
 /*
  * ZIO types.  Needed to interpret vdev statistics below.
@@ -124,7 +125,7 @@ type ExportedPool struct {
 
 // Pool object represents handler to single ZFS pool
 //
-/* Pool.Properties map[string]Property
+/* Pool.Properties map[string]PropertyValue
  */
 // Map of all ZFS pool properties, changing any of this will not affect ZFS
 // pool, for that use SetProperty( name, value string) method of the pool
@@ -133,8 +134,23 @@ type ExportedPool struct {
 // with up to date values with call to (*Pool) ReloadProperties
 type Pool struct {
 	list       C.zpool_list_ptr
-	Properties []Property
-	Features   map[string]string
+	Properties PoolProperties		`json:"properties,omitempty"`
+	Features   map[string]string	`json:"features,omitempty"`
+}
+
+func NewPool() (*Pool) {
+	return &Pool{
+		Properties: make(PoolProperties),
+		Features: make(map[string]string),
+	}
+}
+
+func (p Pool) String() string {
+	data, err := json.Marshal(p)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // PoolOpen open ZFS pool handler by name.
@@ -479,8 +495,8 @@ func PoolCloseAll(pools []Pool) {
 // ( returns built in string representation of property name).
 // This is optional, you can represent each property with string
 // name of choice.
-func PoolPropertyToName(p Prop) (name string) {
-	if p == PoolNumProps {
+func PoolPropertyToName(p PoolProp) (name string) {
+	if p == zfsMaxPoolProp {
 		return "numofprops"
 	}
 	prop := C.zpool_prop_t(p)
@@ -512,30 +528,19 @@ func (pool *Pool) ReloadProperties() (err error) {
 		return
 	}
 
-	pool.Properties = make([]Property, PoolNumProps+1)
+	pool.Properties = make(map[PoolProp]PropertyValue)
 	next := propList
 	for next != nil {
-		if int(next.property) < int(PoolNumProps) {
-			pool.Properties[next.property] = Property{Value: C.GoString(&(next.value[0])), Source: C.GoString(&(next.source[0]))}
+		if int(next.property) < int(zfsMaxPoolProp) {
+			pool.Properties[PoolProp(next.property)] = PropertyValue{Value: C.GoString(&(next.value[0])), Source: C.GoString(&(next.source[0]))}
 		}
 		next = C.next_property(next)
 	}
 	C.free_properties(propList)
 
 	// read features
-	pool.Features = map[string]string{
-		"async_destroy":      "disabled",
-		"empty_bpobj":        "disabled",
-		"lz4_compress":       "disabled",
-		"spacemap_histogram": "disabled",
-		"enabled_txg":        "disabled",
-		"hole_birth":         "disabled",
-		"extensible_dataset": "disabled",
-		"embedded_data":      "disabled",
-		"bookmarks":          "disabled",
-		"filesystem_limits":  "disabled",
-		"large_blocks":       "disabled"}
-	for name := range pool.Features {
+	pool.Features = make(map[string]string)
+	for _, name := range featuresTable {
 		_, ferr := pool.GetFeature(name)
 		if ferr != nil {
 			// tolerate it
@@ -546,10 +551,10 @@ func (pool *Pool) ReloadProperties() (err error) {
 
 // GetProperty reload and return single specified property. This also reloads requested
 // property in Properties map.
-func (pool *Pool) GetProperty(p Prop) (prop Property, err error) {
+func (pool *Pool) GetProperty(p PoolProp) (prop PropertyValue, err error) {
 	if pool.list != nil {
 		// First check if property exist at all
-		if p < PoolPropName || p > PoolNumProps {
+		if p < PoolPropName || p > zfsMaxPoolProp {
 			err = errors.New(fmt.Sprint("Unknown zpool property: ",
 				PoolPropertyToName(p)))
 			return
@@ -587,10 +592,10 @@ func (pool *Pool) GetFeature(name string) (value string, err error) {
 // SetProperty set ZFS pool property to value. Not all properties can be set,
 // some can be set only at creation time and some are read only.
 // Always check if returned error and its description.
-func (pool *Pool) SetProperty(p Prop, value string) (err error) {
+func (pool *Pool) SetProperty(p PoolProp, value string) (err error) {
 	if pool.list != nil {
 		// First check if property exist at all
-		if p < PoolPropName || p > PoolNumProps {
+		if p < PoolPropName || p > zfsMaxPoolProp {
 			err = errors.New(fmt.Sprint("Unknown zpool property: ",
 				PoolPropertyToName(p)))
 			return
@@ -628,7 +633,7 @@ func (pool *Pool) Name() (name string, err error) {
 		err = errors.New(msgPoolIsNil)
 	} else {
 		name = C.GoString(C.zpool_get_name(pool.list.zph))
-		pool.Properties[PoolPropName] = Property{Value: name, Source: "none"}
+		pool.Properties[PoolPropName] = PropertyValue{Value: name, Source: "none"}
 	}
 	return
 }
@@ -678,7 +683,7 @@ func toCPoolProperties(props PoolProperties) (cprops C.nvlist_ptr) {
 	cprops = C.new_property_nvlist()
 	for prop, value := range props {
 		name := C.zpool_prop_to_name(C.zpool_prop_t(prop))
-		csPropValue := C.CString(value)
+		csPropValue := C.CString(value.Value)
 		r := C.property_nvlist_add(cprops, name, csPropValue)
 		C.free(unsafe.Pointer(csPropValue))
 		if r != 0 {
@@ -696,7 +701,7 @@ func toCDatasetProperties(props DatasetProperties) (cprops C.nvlist_ptr) {
 	cprops = C.new_property_nvlist()
 	for prop, value := range props {
 		name := C.zfs_prop_to_name(C.zfs_prop_t(prop))
-		csPropValue := C.CString(value)
+		csPropValue := C.CString(value.Value)
 		r := C.property_nvlist_add(cprops, name, csPropValue)
 		C.free(unsafe.Pointer(csPropValue))
 		if r != 0 {
@@ -804,7 +809,7 @@ func buildVDevTree(root *C.nvlist_t, rtype VDevType, vdevs, spares, l2cache []VD
 				return
 			}
 		} else {
-			ashift, _ := strconv.Atoi(props[PoolPropAshift])
+			ashift, _ := strconv.Atoi(props[PoolPropAshift].Value)
 			if child, err = buildVdev(vdev, ashift); err != nil {
 				return
 			}
@@ -820,13 +825,13 @@ func buildVDevTree(root *C.nvlist_t, rtype VDevType, vdevs, spares, l2cache []VD
 		}
 	}
 	if len(spares) > 0 {
-		ashift, _ := strconv.Atoi(props[PoolPropAshift])
+		ashift, _ := strconv.Atoi(props[PoolPropAshift].Value)
 		if err = buildVdevSpares(root, VDevTypeRoot, spares, ashift); err != nil {
 			return
 		}
 	}
 	if len(l2cache) > 0 {
-		ashift, _ := strconv.Atoi(props[PoolPropAshift])
+		ashift, _ := strconv.Atoi(props[PoolPropAshift].Value)
 		if err = buildVdevL2Cache(root, VDevTypeRoot, l2cache, ashift); err != nil {
 			return
 		}
@@ -909,22 +914,22 @@ func PoolCreate(name string, vdev VDevTree, features map[string]string,
 	}
 
 	// Enable 0.6.5 features per default
-	features["spacemap_histogram"] = FENABLED
-	features["enabled_txg"] = FENABLED
-	features["hole_birth"] = FENABLED
-	features["extensible_dataset"] = FENABLED
-	features["embedded_data"] = FENABLED
-	features["bookmarks"] = FENABLED
-	features["filesystem_limits"] = FENABLED
-	features["large_blocks"] = FENABLED
+	features[ZFEATURE_STR_SPACEMAP_HISTOGRAM] = FENABLED
+	features[ZFEATURE_STR_ENABLED_TXG] = FENABLED
+	features[ZFEATURE_STR_HOLE_BIRTH] = FENABLED
+	features[ZFEATURE_STR_EXTENSIBLE_DATASET] = FENABLED
+	features[ZFEATURE_STR_EMBEDDED_DATA] = FENABLED
+	features[ZFEATURE_STR_BOOKMARKS] = FENABLED
+	features[ZFEATURE_STR_FILESYSTEM_LIMITS] = FENABLED
+	features[ZFEATURE_STR_LARGE_BLOCKS] = FENABLED
 
 	// Enable 0.7.x features per default
-	features["multi_vdev_crash_dump"] = FENABLED
-	features["large_dnode"] = FENABLED
-	features["sha512"] = FENABLED
-	features["skein"] = FENABLED
-	features["edonr"] = FENABLED
-	features["userobj_accounting"] = FENABLED
+	features[ZFEATURE_STR_MULTI_VDEV_CRASH_DUMP] = FENABLED
+	features[ZFEATURE_STR_LARGE_DNODE] = FENABLED
+	features[ZFEATURE_STR_SHA512] = FENABLED
+	features[ZFEATURE_STR_SKEIN] = FENABLED
+	features[ZFEATURE_STR_EDONR] = FENABLED
+	features[ZFEATURE_STR_USEROBJ_ACCOUNTING] = FENABLED
 
 	// convert properties
 	cprops := toCPoolProperties(props)

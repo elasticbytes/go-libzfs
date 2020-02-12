@@ -12,6 +12,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"encoding/json"
 	"time"
 	"unsafe"
 )
@@ -21,23 +22,62 @@ const (
 )
 
 // DatasetProperties type is map of dataset or volume properties prop -> value
-type DatasetProperties map[Prop]string
+type DatasetProperties map[DatasetProp]PropertyValue
 
 // DatasetType defines enum of dataset types
 type DatasetType int32
 
 const (
 	// DatasetTypeFilesystem - file system dataset
-	DatasetTypeFilesystem DatasetType = (1 << iota)
+	DatasetTypeFilesystem DatasetType = C.ZFS_TYPE_FILESYSTEM
 	// DatasetTypeSnapshot - snapshot of dataset
-	DatasetTypeSnapshot
+	DatasetTypeSnapshot   DatasetType = C.ZFS_TYPE_SNAPSHOT
 	// DatasetTypeVolume - volume (virtual block device) dataset
-	DatasetTypeVolume
+	DatasetTypeVolume     DatasetType = C.ZFS_TYPE_VOLUME
 	// DatasetTypePool - pool dataset
-	DatasetTypePool
+	DatasetTypePool       DatasetType = C.ZFS_TYPE_POOL
 	// DatasetTypeBookmark - bookmark dataset
-	DatasetTypeBookmark
+	DatasetTypeBookmark   DatasetType = C.ZFS_TYPE_BOOKMARK
 )
+
+var stringToDatasetType = make(map[string]DatasetType)
+
+func init() {
+	types := [...]DatasetType{
+		DatasetTypeFilesystem,
+		DatasetTypeSnapshot,
+		DatasetTypeVolume,
+		DatasetTypePool,
+		DatasetTypeBookmark,
+	}
+
+	for _, t := range types {
+		stringToDatasetType[t.String()] = t
+	}
+}
+
+func (t DatasetType) String() string {
+	return C.GoString(C.zfs_type_to_name((C.zfs_type_t)(t)))
+}
+
+func (t DatasetType) MarshalJSON() ([]byte, error) {
+	s := t.String()
+	return json.Marshal(s)
+}
+
+func (t *DatasetType) UnmarshalJSON(b []byte) error {
+	var j string
+	err := json.Unmarshal(b, &j)
+	if err != nil {
+		return err
+	}
+	dstype, ok := stringToDatasetType[j]
+	if !ok {
+		return fmt.Errorf("type \"%s\" not exists", j)
+	}
+	*t = dstype
+	return err
+}
 
 // HoldTag - user holds  tags
 type HoldTag struct {
@@ -48,9 +88,23 @@ type HoldTag struct {
 // Dataset - ZFS dataset object
 type Dataset struct {
 	list       C.dataset_list_ptr
-	Type       DatasetType
-	Properties map[Prop]Property
-	Children   []Dataset
+	Type       DatasetType			`json:"type,omitempty"`
+	Properties DatasetProperties	`json:"properties,omitempty"`
+	Children   []Dataset			`json:"-"`
+}
+
+func NewDataset() (*Dataset) {
+	return &Dataset{
+		Properties: make(DatasetProperties),
+	}
+}
+
+func (p Dataset) String() string {
+	data, err := json.Marshal(&p)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 func (d *Dataset) openChildren() (err error) {
@@ -58,8 +112,8 @@ func (d *Dataset) openChildren() (err error) {
 	list := C.dataset_list_children(d.list)
 	for list != nil {
 		dataset := Dataset{list: list}
-		dataset.Type = DatasetType(C.dataset_type(d.list))
-		dataset.Properties = make(map[Prop]Property)
+		dataset.Type = DatasetType(C.dataset_type(list))
+		dataset.Properties = make(map[DatasetProp]PropertyValue)
 		err = dataset.ReloadProperties()
 		if err != nil {
 			return
@@ -130,7 +184,7 @@ func DatasetOpenSingle(path string) (d Dataset, err error) {
 		return
 	}
 	d.Type = DatasetType(C.dataset_type(d.list))
-	d.Properties = make(map[Prop]Property)
+	d.Properties = make(map[DatasetProp]PropertyValue)
 	err = d.ReloadProperties()
 	if err != nil {
 		return
@@ -138,7 +192,7 @@ func DatasetOpenSingle(path string) (d Dataset, err error) {
 	return
 }
 
-func datasetPropertiesTonvlist(props map[Prop]Property) (
+func datasetPropertiesTonvlist(props map[DatasetProp]PropertyValue) (
 	cprops C.nvlist_ptr, err error) {
 	// convert properties to nvlist C type
 	cprops = C.new_property_nvlist()
@@ -163,7 +217,7 @@ func datasetPropertiesTonvlist(props map[Prop]Property) (
 // DatasetCreate create a new filesystem or volume on path representing
 // pool/dataset or pool/parent/dataset
 func DatasetCreate(path string, dtype DatasetType,
-	props map[Prop]Property) (d Dataset, err error) {
+	props map[DatasetProp]PropertyValue) (d Dataset, err error) {
 	var cprops C.nvlist_ptr
 	if cprops, err = datasetPropertiesTonvlist(props); err != nil {
 		return
@@ -316,15 +370,16 @@ func (d *Dataset) ReloadProperties() (err error) {
 		err = NewError(EUndefined, msgDatasetIsNil)
 		return
 	}
-	d.Properties = make(map[Prop]Property)
+	d.Properties = make(map[DatasetProp]PropertyValue)
 	Global.Mtx.Lock()
 	defer Global.Mtx.Unlock()
-	for prop := DatasetPropType; prop < DatasetNumProps; prop++ {
+
+	for prop := DatasetPropType; prop < zfsMaxDatasetProp; prop++ {
 		plist := C.read_dataset_property(d.list, C.int(prop))
 		if plist == nil {
 			continue
 		}
-		d.Properties[prop] = Property{Value: C.GoString(&(*plist).value[0]),
+		d.Properties[prop] = PropertyValue{Value: C.GoString(&(*plist).value[0]),
 			Source: C.GoString(&(*plist).source[0])}
 		C.free_properties(plist)
 	}
@@ -333,7 +388,7 @@ func (d *Dataset) ReloadProperties() (err error) {
 
 // GetProperty reload and return single specified property. This also reloads requested
 // property in Properties map.
-func (d *Dataset) GetProperty(p Prop) (prop Property, err error) {
+func (d *Dataset) GetProperty(p DatasetProp) (prop PropertyValue, err error) {
 	if d.list == nil {
 		err = NewError(EUndefined, msgDatasetIsNil)
 		return
@@ -346,14 +401,14 @@ func (d *Dataset) GetProperty(p Prop) (prop Property, err error) {
 		return
 	}
 	defer C.free_properties(plist)
-	prop = Property{Value: C.GoString(&(*plist).value[0]),
+	prop = PropertyValue{Value: C.GoString(&(*plist).value[0]),
 		Source: C.GoString(&(*plist).source[0])}
 	d.Properties[p] = prop
 	return
 }
 
 // GetUserProperty - lookup and return user propery
-func (d *Dataset) GetUserProperty(p string) (prop Property, err error) {
+func (d *Dataset) GetUserProperty(p string) (prop PropertyValue, err error) {
 	if d.list == nil {
 		err = NewError(EUndefined, msgDatasetIsNil)
 		return
@@ -366,7 +421,7 @@ func (d *Dataset) GetUserProperty(p string) (prop Property, err error) {
 		return
 	}
 	defer C.free_properties(plist)
-	prop = Property{Value: C.GoString(&(*plist).value[0]),
+	prop = PropertyValue{Value: C.GoString(&(*plist).value[0]),
 		Source: C.GoString(&(*plist).source[0])}
 	return
 }
@@ -374,7 +429,7 @@ func (d *Dataset) GetUserProperty(p string) (prop Property, err error) {
 // SetProperty set ZFS dataset property to value. Not all properties can be set,
 // some can be set only at creation time and some are read only.
 // Always check if returned error and its description.
-func (d *Dataset) SetProperty(p Prop, value string) (err error) {
+func (d *Dataset) SetProperty(p DatasetProp, value string) (err error) {
 	if d.list == nil {
 		err = NewError(EUndefined, msgDatasetIsNil)
 		return
@@ -411,7 +466,7 @@ func (d *Dataset) SetUserProperty(prop, value string) (err error) {
 
 // Clone - clones the dataset.  The target must be of the same type as
 // the source.
-func (d *Dataset) Clone(target string, props map[Prop]Property) (rd Dataset, err error) {
+func (d *Dataset) Clone(target string, props map[DatasetProp]PropertyValue) (rd Dataset, err error) {
 	var cprops C.nvlist_ptr
 	if d.list == nil {
 		err = NewError(EUndefined, msgDatasetIsNil)
@@ -432,7 +487,7 @@ func (d *Dataset) Clone(target string, props map[Prop]Property) (rd Dataset, err
 }
 
 // DatasetSnapshot create dataset snapshot. Set recur to true to snapshot child datasets.
-func DatasetSnapshot(path string, recur bool, props map[Prop]Property) (rd Dataset, err error) {
+func DatasetSnapshot(path string, recur bool, props map[DatasetProp]PropertyValue) (rd Dataset, err error) {
 	var cprops C.nvlist_ptr
 	if cprops, err = datasetPropertiesTonvlist(props); err != nil {
 		return
@@ -660,8 +715,8 @@ func (d *Dataset) Holds() (tags []HoldTag, err error) {
 // ( returns built in string representation of property name).
 // This is optional, you can represent each property with string
 // name of choice.
-func DatasetPropertyToName(p Prop) (name string) {
-	if p == DatasetNumProps {
+func DatasetPropertyToName(p DatasetProp) (name string) {
+	if p == zfsMaxDatasetProp {
 		return "numofprops"
 	}
 	prop := C.zfs_prop_t(p)
@@ -800,7 +855,7 @@ func (d *Dataset) Clones() (clones []string, err error) {
 				if len(origin) > 0 {
 					if dIsSnapshot && origin == d.Properties[DatasetPropName].Value {
 						// if this dataset is snaphot
-						ch.Properties[DatasetNumProps+1000] = d.Properties[DatasetPropCreateTXG]
+						ch.Properties[zfsMaxDatasetProp+1000] = d.Properties[DatasetPropCreateTXG]
 						sortDesc = append(sortDesc, ch)
 					} else {
 						// Check if origin of this dataset is one of snapshots
@@ -808,7 +863,7 @@ func (d *Dataset) Clones() (clones []string, err error) {
 						if !ok {
 							continue
 						}
-						ch.Properties[DatasetNumProps+1000] = snap.Properties[DatasetPropCreateTXG]
+						ch.Properties[zfsMaxDatasetProp+1000] = snap.Properties[DatasetPropCreateTXG]
 						sortDesc = append(sortDesc, ch)
 					}
 				}

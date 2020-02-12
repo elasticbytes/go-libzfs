@@ -40,6 +40,9 @@ func to_sendflags_t(flags *SendFlags) (cflags *C.sendflags_t) {
 	cflags.largeblock = to_boolean_t(flags.LargeBlock)
 	cflags.embed_data = to_boolean_t(flags.EmbedData)
 	cflags.compress = to_boolean_t(flags.Compress)
+	if flags.Raw {
+		C.sendflags_set_raw(cflags)
+	}
 	return
 }
 
@@ -144,7 +147,7 @@ func (d *Dataset) Send(outf *os.File, flags SendFlags) (err error) {
 }
 
 func (d *Dataset) SendFrom(FromName string, outf *os.File, flags SendFlags) (err error) {
-	var porigin Property
+	var porigin PropertyValue
 	var from, dest []string
 	if err = d.ReloadProperties(); err != nil {
 		return

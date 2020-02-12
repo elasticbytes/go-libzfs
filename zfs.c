@@ -67,13 +67,14 @@ dataset_list_ptr dataset_next(dataset_list_t *dataset) {
 	return dataset->pnext;
 }
 
-int dataset_type(dataset_list_ptr dataset) {
+zfs_type_t dataset_type(dataset_list_ptr dataset) {
 	return zfs_get_type(dataset->zh);
 }
 
 dataset_list_ptr dataset_open(const char *path) {
 	dataset_list_ptr list = create_dataset_list_item();
-	list->zh = zfs_open(libzfs_get_handle(), path, 0xF);
+	zfs_type_t types = ZFS_TYPE_FILESYSTEM | ZFS_TYPE_SNAPSHOT | ZFS_TYPE_VOLUME | ZFS_TYPE_POOL | ZFS_TYPE_BOOKMARK;
+	list->zh = zfs_open(libzfs_get_handle(), path, types);
 	if (list->zh == NULL) {
 		dataset_list_free(list);
 		list = NULL;
@@ -267,6 +268,15 @@ sendflags_t *alloc_sendflags() {
 	memset(r, 0, sizeof(sendflags_t));
 	return r;
 }
+
+void sendflags_set_raw(sendflags_t * flags) {
+#if LIBZFS_VERSION_MINOR == 7
+
+#else
+	flags->raw = B_TRUE;
+#endif
+}
+
 recvflags_t *alloc_recvflags() {
 	recvflags_t *r = malloc(sizeof(recvflags_t));
 	memset(r, 0, sizeof(recvflags_t));
