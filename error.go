@@ -81,6 +81,7 @@ const (
 
 	EUndefined ErrorCode = -1
 	ESuccess   ErrorCode =  0          /* no error -- success */
+	ESquelched ErrorCode = 1666
 )
 
 

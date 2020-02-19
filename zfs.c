@@ -113,8 +113,37 @@ int dataset_prop_set(dataset_list_ptr dataset, zfs_prop_t prop, const char *valu
 	return zfs_prop_set(dataset->zh, zfs_prop_to_name(prop), value);
 }
 
+#include <signal.h>
+#include <setjmp.h>
+
+static struct sigaction dataset_old_action;
+static __thread int dataset_catching;
+static __thread jmp_buf dataset_jbuf;
+
+void dataset_catcher(int signum, siginfo_t *info, void *context) {
+	if(dataset_catching)
+		siglongjmp(dataset_jbuf, 1);
+	else
+		dataset_old_action.sa_sigaction(signum, info, context);
+}
+
+void dataset_init_catcher() {
+	struct sigaction action;
+	sigaction(SIGSEGV, NULL, &action);
+	action.sa_sigaction = dataset_catcher;
+	sigaction(SIGSEGV, &action, &dataset_old_action);
+}
+
 int dataset_user_prop_set(dataset_list_ptr dataset, const char *prop, const char *value) {
-	return zfs_prop_set(dataset->zh, prop, value);
+	if (sigsetjmp (dataset_jbuf, !0) == 0) {
+		dataset_catching++;
+		int e = zfs_prop_set(dataset->zh, prop, value);
+		dataset_catching--;
+		return e;
+	} else {
+		zfs_standard_error(libzfs_get_handle(), EZFS_SQUELCHED, "squelched");
+		return EZFS_SQUELCHED;
+	}
 }
 
 int dataset_clone(dataset_list_ptr dataset, const char *target, nvlist_ptr props) {

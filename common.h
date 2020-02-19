@@ -25,6 +25,7 @@
 #define INT_MAX_VALUE               1024
 #define	ZAP_OLDMAXVALUELEN          1024
 #define	ZFS_MAX_DATASET_NAME_LEN    256
+#define EZFS_SQUELCHED              1666
 
 typedef struct property_list {
 	char value[INT_MAX_VALUE];

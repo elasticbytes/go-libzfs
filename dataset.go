@@ -5,6 +5,7 @@ package zfs
 // #include "common.h"
 // #include "zpool.h"
 // #include "zfs.h"
+// void dataset_init_catcher();
 import "C"
 
 import (
@@ -54,6 +55,8 @@ func init() {
 	for _, t := range types {
 		stringToDatasetType[t.String()] = t
 	}
+
+	C.dataset_init_catcher()
 }
 
 func (t DatasetType) String() string {

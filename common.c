@@ -301,6 +301,8 @@ const char *libzfs_strerrno(int errcode) {
 #endif
 	case EZFS_UNKNOWN:
 		return "unknown error";
+	case EZFS_SQUELCHED:
+		return "squelched panic in zfs_prop_set()";
 	default:
 		return "no error";
 	}
